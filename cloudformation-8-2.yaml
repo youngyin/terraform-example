@@ -1,0 +1,231 @@
+Parameters:
+  KeyName:
+    Description: EC2 KeyPair
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: EC2 KeyPair
+
+  LatestAmiId:
+    Description: EC2 AMI
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    AllowedValues:
+      - '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+
+Resources:
+  MyVPC05:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC05
+
+  MyIGW: # 인터넷 게이트웨이
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyIGW
+
+  MylGWattachment: # VPC - 인터넷 게이트웨이 연결
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref MyIGW
+      VpcId: !Ref MyVPC05
+
+  ## public resources
+  MyPublicSubnet: # 서브넷
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.0.1.0/24
+      Tags:
+        - Key: Name
+          Value: MyPublicSubnet
+      VpcId: !Ref MyVPC05
+
+  MyPublicRouting: # 라우팅 테이블
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC05
+      Tags: 
+        - Key: Name
+          Value: MyPublicSubnet
+
+  MyPublicRouteTableAssociation: # 라우팅 - 서브넷 연결
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref MyPublicRouting
+      SubnetId: !Ref MyPublicSubnet
+
+  MyPublicDefault: 
+    Type: AWS::EC2::Route
+    DependsOn: MylGWattachment
+    Properties:
+      RouteTableId: !Ref MyPublicRouting
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyIGW
+
+  MyPublicSecugroup: # 보안그룹
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permit HTTP(80), HTTPS(443) and SSH(22)
+      GroupName : MyPublicSecugroup
+      VpcId: !Ref MyVPC05
+
+      Tags: 
+        - Key: Name
+          Value: MyPublicSecugroup
+      
+      SecurityGroupIngress: # 인바운드 규칙 
+        - IpProtocol: tcp 
+          FromPort: 80 # 80~80 까지의 포트를 허용함. 
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  MyWeb1:
+    Type: 'AWS::EC2::Instance'
+    DependsOn: MylGWattachment
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      Tags: 
+        - Key: Name
+          Value: MyWeb1
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref MyPublicSubnet
+          AssociatePublicIpAddress: true
+          PrivateIpAddress: 10.0.1.101
+          GroupSet:
+            - !Ref MyPublicSecugroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          hostnamectl --static set-hostname MyWeb1
+
+          echo "toor1234." | passwd --stdin root
+
+          sed -i "s/^PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          sed -i "s/^#PermitRootLogin yes/PermitRootLogin yes/g" /etc/ssh/sshd_config
+
+          systemctl restart sshd
+
+          yum install -y httpd
+          systemctl enable --now httpd
+
+          echo "<h1>MyWeb1 test web page</h1>" > /var/www/html/index.html
+  
+  MyNatGWEIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: VPC
+
+  MyNatGW:
+    Type: AWS::EC2::NatGateway
+    DependsOn: MylGWattachment # MylGWattachment 이후에 생성되어야 한다. 
+    Properties:
+      AllocationId: !GetAtt MyNatGWEIP.AllocationId
+      SubnetId: !Ref MyPublicSubnet
+      Tags: 
+        - Key: Name
+          Value: MyNatGW
+
+  ## public resources
+  MyPrivateSubnet: # 서브넷
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.0.100.0/24
+      Tags:
+        - Key: Name
+          Value: MyPrivateSubnet
+      VpcId: !Ref MyVPC05
+
+  MyPrivateRouting: # 라우팅 테이블
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC05
+      Tags: 
+        - Key: Name
+          Value: MyPrivateSubnet
+
+  MyPrivateRouteTableAssociation: # 라우팅 - 서브넷 연결
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref MyPrivateRouting
+      SubnetId: !Ref MyPrivateSubnet
+
+  MyPrivateDefault: 
+    Type: AWS::EC2::Route
+    DependsOn: MyNatGW # Nat Gateway 생성 후 진행해야 한다. 
+    Properties:
+      RouteTableId: !Ref MyPrivateRouting
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref MyNatGW
+
+  MyPrivateSecugroup: # 보안그룹
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permit HTTP(80), HTTPS(443) and SSH(22)
+      GroupName : MyPrivateSecugroup
+      VpcId: !Ref MyVPC05
+
+      Tags: 
+        - Key: Name
+          Value: MyPrivateSecugroup
+      
+      SecurityGroupIngress: # 인바운드 규칙 
+        - IpProtocol: tcp 
+          FromPort: 80 # 80~80 까지의 포트를 허용함. 
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  MyWeb11:
+    Type: 'AWS::EC2::Instance'
+    DependsOn: MyNatGW
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      Tags: 
+        - Key: Name
+          Value: MyWeb11
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref MyPrivateSubnet 
+          PrivateIpAddress: 10.0.100.101  # 수정
+          GroupSet:
+            - !Ref MyPrivateSecugroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          hostnamectl --static set-hostname MyWeb11
+          echo "toor1234." | passwd --stdin root
+          sed -i "s/^PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          sed -i "s/^#PermitRootLogin yes/PermitRootLogin yes/g" /etc/ssh/sshd_config
+          systemctl restart sshd
+          yum install -y httpd
+          systemctl enable --now httpd
+          echo "<h1>MyWeb11 test web page</h1>" > /var/www/html/index.html
+
+  
