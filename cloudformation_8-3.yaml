@@ -1,0 +1,304 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: EC2 인스턴스를 위한 VPC, 서브넷, 보안그룹, IGW, 라우팅, NLB 설정
+
+Parameters:
+  KeyName:
+    Description: EC2 KeyPair
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: EC2 KeyPair
+
+  LatestAmiId:
+    Description: EC2 AMI
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    AllowedValues:
+      - '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+
+Resources:
+  ## VPC06 구성
+  MyVPC06:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC06
+
+  MyIGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyIGW
+
+  MylGWattachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref MyIGW
+      VpcId: !Ref MyVPC06
+
+  MyPublic1Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.0.1.0/24
+      VpcId: !Ref MyVPC06
+      Tags:
+        - Key: Name
+          Value: MyPublic1Subnet
+
+  MyPublic1Routing:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC06
+      Tags: 
+        - Key: Name
+          Value: MyPublic1Routing
+
+  MyPublic1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref MyPublic1Routing
+      SubnetId: !Ref MyPublic1Subnet
+
+  MyPublic1Default: 
+    Type: AWS::EC2::Route
+    DependsOn: MylGWattachment
+    Properties:
+      RouteTableId: !Ref MyPublic1Routing
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyIGW
+
+  MyPublic1Secugroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permit HTTP, HTTPS, SSH
+      GroupName: MyPublic1Secugroup
+      VpcId: !Ref MyVPC06
+      Tags:
+        - Key: Name
+          Value: MyPublic1Secugroup
+      SecurityGroupIngress: 
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  MyWeb1:
+    Type: AWS::EC2::Instance
+    DependsOn: MylGWattachment
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: MyWeb1
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref MyPublic1Subnet
+          AssociatePublicIpAddress: true
+          PrivateIpAddress: 10.0.1.101
+          GroupSet:
+            - !Ref MyPublic1Secugroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          hostnamectl --static set-hostname MyWeb1
+          echo "toor1234." | passwd --stdin root
+          sed -i "s/^PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          sed -i "s/^#PermitRootLogin yes/PermitRootLogin yes/g" /etc/ssh/sshd_config
+          systemctl restart sshd
+          yum install -y httpd
+          systemctl enable --now httpd
+          echo "<h1>MyWeb1 test web page</h1>" > /var/www/html/index.html
+
+  ## VPC07 구성
+  MyVPC07:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.1.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: MyVPC07
+
+  MyIGW2:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: MyIGW2
+
+  MylGW2attachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref MyIGW2
+      VpcId: !Ref MyVPC07
+
+  MyPublic2Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.1.1.0/24
+      VpcId: !Ref MyVPC07
+      Tags:
+        - Key: Name
+          Value: MyPublic2Subnet
+
+  MyPublic2Routing:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC07
+      Tags:
+        - Key: Name
+          Value: MyPublic2Routing
+
+  MyPublic2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref MyPublic2Routing
+      SubnetId: !Ref MyPublic2Subnet
+
+  MyPublic2Default:
+    Type: AWS::EC2::Route
+    DependsOn: MylGW2attachment
+    Properties:
+      RouteTableId: !Ref MyPublic2Routing
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyIGW2
+
+  MyPublic2Secugroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permit HTTP, HTTPS, SSH
+      GroupName: MyPublic2Secugroup
+      VpcId: !Ref MyVPC07
+      Tags:
+        - Key: Name
+          Value: MyPublic2Secugroup
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  MyWeb2:
+    Type: AWS::EC2::Instance
+    DependsOn: MylGW2attachment
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: MyWeb2
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref MyPublic2Subnet
+          AssociatePublicIpAddress: true
+          PrivateIpAddress: 10.1.1.102
+          GroupSet:
+            - !Ref MyPublic2Secugroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          hostnamectl --static set-hostname MyWeb2
+          echo "toor1234." | passwd --stdin root
+          sed -i "s/^PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          sed -i "s/^#PermitRootLogin yes/PermitRootLogin yes/g" /etc/ssh/sshd_config
+          systemctl restart sshd
+          yum install -y httpd
+          systemctl enable --now httpd
+          echo "<h1>MyWeb2 test web page</h1>" > /var/www/html/index.html
+
+  MyWeb3:
+    Type: AWS::EC2::Instance
+    DependsOn: MylGW2attachment
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      Tags:
+        - Key: Name
+          Value: MyWeb3
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref MyPublic2Subnet
+          AssociatePublicIpAddress: true
+          PrivateIpAddress: 10.1.1.103
+          GroupSet:
+            - !Ref MyPublic2Secugroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          hostnamectl --static set-hostname MyWeb3
+          echo "toor1234." | passwd --stdin root
+          sed -i "s/^PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          sed -i "s/^#PermitRootLogin yes/PermitRootLogin yes/g" /etc/ssh/sshd_config
+          systemctl restart sshd
+          yum install -y httpd
+          systemctl enable --now httpd
+          echo "<h1>MyWeb3 test web page</h1>" > /var/www/html/index.html
+
+  MyNLBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn:
+      - MyWeb2
+      - MyWeb3
+    Properties:
+      Name: MyNLBTargetGroup
+      Port: 80
+      Protocol: TCP
+      VpcId: !Ref MyVPC07
+      TargetType: instance
+      Targets:
+        - Id: !Ref MyWeb2
+          Port: 80
+        - Id: !Ref MyWeb3
+          Port: 80
+      Tags:
+        - Key: Name
+          Value: MyNLBTargetGroup
+
+  MyNLB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: MyNLBTargetGroup
+    Properties:
+      Type: network
+      Scheme: internet-facing
+      Subnets:
+        - !Ref MyPublic2Subnet
+      Tags:
+        - Key: Name
+          Value: MyNLB
+
+  MyNLBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: MyNLBTargetGroup
+    Properties:
+      LoadBalancerArn: !Ref MyNLB
+      Port: 80
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MyNLBTargetGroup
