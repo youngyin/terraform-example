@@ -22,9 +22,106 @@ Resources:
         - Key: Name
           Value: MyVPC04
 
-  MyIGW : 
-    Properties: AWS::EC2::InternetGateway
+  MyIGW: # 인터넷 게이트웨이
+    Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
           Value: MyIGW
+
+  MylGWattachment: # VPC - 인터넷 게이트웨이 연결
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref MyIGW
+      VpcId: !Ref MyVPC04
+
+  MyPublicSubnet: # 서브넷
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: 10.0.1.0/24
+      Tags:
+        - Key: Name
+          Value: MyPublicSubnet
+      VpcId: !Ref MyVPC04
+
+  MyPublicRouting: # 라우팅 테이블
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref MyVPC04
+      Tags: 
+        - Key: Name
+          Value: MyPublicSubnet
+
+  MyPublicRouteTableAssociation: # 라우팅 - 서브넷 연결
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref MyPublicRouting
+      SubnetId: !Ref MyPublicSubnet
+
+  MyPublicDefault: 
+    Type: AWS::EC2::Route
+    DependsOn: MylGWattachment
+    Properties:
+      RouteTableId: !Ref MyPublicRouting
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyIGW
+
+  MyPublicSecugroup: # 보안그룹
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Permit HTTP(80), HTTPS(443) and SSH(22)
+      GroupName : MyPublicSecugroup
+      VpcId: !Ref MyVPC04
+
+      Tags: 
+        - Key: Name
+          Value: MyPublicSecugroup
+      
+      SecurityGroupIngress: # 인바운드 규칙 
+        - IpProtocol: tcp 
+          FromPort: 80 # 80~80 까지의 포트를 허용함. 
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  MyWeb:
+    Type: 'AWS::EC2::Instance'
+    DependsOn: MylGWattachment
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.micro
+      KeyName: !Ref KeyName
+      Tags: 
+        - Key: Name
+          Value: MyWeb
+      NetworkInterfaces:
+        - DeviceIndex: 0
+          SubnetId: !Ref MyPublicSubnet
+          AssociatePublicIpAddress: true
+          PrivateIpAddress: 10.0.1.101
+          GroupSet:
+            - !Ref MyPublicSecugroup
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          hostnamectl --static set-hostname MyWeb
+
+          echo "toor1234." | passwd --stdin root
+
+          sed -i "s/^PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          sed -i "s/^#PermitRootLogin yes/PermitRootLogin yes/g" /etc/ssh/sshd_config
+
+          systemctl restart sshd
+
+          yum install -y httpd
+          systemctl enable --now httpd
+
+          echo "<h1>MyWeb test web page</h1>" > /var/www/html/index.html
