@@ -1,0 +1,10 @@
+MyVPC04
+MyIGW
+MylGWattachment
+MyPublicSubnet
+MyPublicRouting
+MyPublicRoute 
+MyPublicRouteTableAssociation
+MyPublicDefault
+MyPublicSecugroup
+MyWeb
