@@ -1,0 +1,43 @@
+MyVPC08
+MylGW
+MylGWattachment
+
+MyPublic1Subnet
+MyPublic1Routing
+MyPublic1RouteTableAssociation
+MyPublic1Default
+
+MyPrivate1Subnet 
+MyPrivate1Routing
+MyPrivate1RouteTableAssociation
+MyPrivate1Default
+MyNatGW1EIP
+MyNatGW1
+
+MyPublic2Subnet
+MyPublic2Routing
+MyPublic2RouteTableAssociation
+MyPublic2Default
+
+MyPrivate2Subnet 
+MyPrivate2Routing
+MyPrivate2RouteTableAssociation
+MyPrivate2Default
+MyNatGW2EIP
+MyNatGW2
+
+MySecuregroup
+Permit HTTP(80), HTTP(443) ans SSH
+
+MyALBtargetgroup
+MyALB
+MyALBListener
+
+MyLaunachTemplate
+MyAutoScalinginGroup
+
+MyDbSecuregroup
+MyDBSubnetGroup / mydbsubnetgroup -- 소문자로 인식
+MyDBCluster / mydb
+MyDB1 / mydb-1
+MyDB2 / mydb-2
